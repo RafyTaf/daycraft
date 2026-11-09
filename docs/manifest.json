@@ -1,0 +1,32 @@
+{
+  "name": "DayCraft",
+  "short_name": "DayCraft",
+  "description": "Log your Shoulds, Coulds and Shouldn'ts, and keep your little creature healthy.",
+  "start_url": "/daycraft/",
+  "scope": "/daycraft/",
+  "id": "/daycraft/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#EEF3FF",
+  "theme_color": "#FFFFFF",
+  "icons": [
+    {
+      "src": "/daycraft/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/daycraft/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/daycraft/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

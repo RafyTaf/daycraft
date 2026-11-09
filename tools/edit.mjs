@@ -1,0 +1,15 @@
+import puppeteer from "puppeteer-core";
+const b = await puppeteer.launch({ executablePath: "/usr/bin/google-chrome", headless: "new", args: ["--no-sandbox"] });
+const p = await b.newPage();
+await p.setViewport({ width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+await p.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "dark" }]);
+await p.goto("http://localhost:4173/", { waitUntil: "networkidle0" });
+await p.evaluate(() => [...document.querySelectorAll("button")].find((x) => x.textContent.includes("COULD")).click());
+await new Promise((r) => setTimeout(r, 500));
+await p.evaluate(() => [...document.querySelectorAll("button")].find((x) => x.textContent.includes("Practice golf")).click());
+await new Promise((r) => setTimeout(r, 400));
+const fs = await p.evaluate(() => { const i = document.querySelector("input"); i.scrollIntoView({ block: "center" }); return getComputedStyle(i).fontSize; });
+await new Promise((r) => setTimeout(r, 400));
+await p.screenshot({ path: "shots/07-log-could-dark.png" });
+console.log("input font-size:", fs);
+await b.close();
