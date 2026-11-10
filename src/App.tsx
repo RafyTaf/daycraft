@@ -15,10 +15,13 @@ type View = "home" | "list" | "edit";
 type CreatureId = "bean" | "sprout" | "ember";
 type ThemeId = "default" | "warm" | "night" | "soft";
 
+type BlockId = "morning" | "market" | "afternoon" | "home";
+
 interface LogItem {
   id: string;
   text: string;
   custom: boolean;
+  block?: BlockId;
 }
 
 interface DayLogs {
@@ -77,6 +80,71 @@ const OPTIONS: Record<Lane, string[]> = {
   ],
 };
 
+interface BlockDef {
+  id: BlockId;
+  name: string;
+  time: string;
+}
+
+const BLOCKS: BlockDef[] = [
+  { id: "morning", name: "Morning", time: "7:30–9:30am · fuel up, pray, get ready" },
+  { id: "market", name: "Market hours", time: "9:30am–12pm · trading period" },
+  { id: "afternoon", name: "Afternoon", time: "12–5pm · lunch, storage, stay busy" },
+  { id: "home", name: "Home stretch", time: "5–7:30pm · cook, dishes, gym" },
+];
+
+const pick = (list: string[], idxs: number[]): string[] => idxs.map((i: number) => list[i]);
+
+// Which of your activities belong to which time block (from your day route).
+const BLOCK_OPTIONS: Record<Lane, Record<BlockId, string[]>> = {
+  should: {
+    morning: pick(OPTIONS.should, [0, 1, 2, 3, 4]),
+    market: pick(OPTIONS.should, [5, 6]),
+    afternoon: pick(OPTIONS.should, [7, 8, 9, 10, 11, 12]),
+    home: pick(OPTIONS.should, [13, 14]),
+  },
+  could: {
+    morning: pick(OPTIONS.could, [7]),
+    market: pick(OPTIONS.could, [0, 1, 6]),
+    afternoon: pick(OPTIONS.could, [3, 4, 5, 7]),
+    home: pick(OPTIONS.could, [2]),
+  },
+  shouldnt: {
+    morning: pick(OPTIONS.shouldnt, [0, 1, 2, 6]),
+    market: pick(OPTIONS.shouldnt, [0, 3]),
+    afternoon: pick(OPTIONS.shouldnt, [0, 4, 5, 7, 8]),
+    home: pick(OPTIONS.shouldnt, [0, 5, 8, 7]),
+  },
+};
+
+function isBlockId(value: unknown): value is BlockId {
+  return value === "morning" || value === "market" || value === "afternoon" || value === "home";
+}
+
+function blockName(id: BlockId): string {
+  const found = BLOCKS.find((b: BlockDef) => b.id === id);
+  return found ? found.name : "";
+}
+
+function currentBlock(): BlockId {
+  const d = new Date();
+  const minutes = d.getHours() * 60 + d.getMinutes();
+  if (minutes >= 17 * 60) return "home";
+  if (minutes >= 12 * 60) return "afternoon";
+  if (minutes >= 9 * 60 + 30) return "market";
+  return "morning";
+}
+
+// Older saved items have no block: place them only when their text belongs to exactly one block.
+function blockOf(lane: Lane, item: LogItem): BlockId | null {
+  if (item.block) return item.block;
+  const key = item.text.trim().toLowerCase();
+  const hits = BLOCKS.filter((b: BlockDef) =>
+    BLOCK_OPTIONS[lane][b.id].some((t: string) => t.toLowerCase() === key),
+  );
+  return hits.length === 1 ? hits[0].id : null;
+}
+
 const CREATURES: { id: CreatureId; name: string; note: string }[] = [
   { id: "bean", name: "Pip", note: "Fluffy little birb" },
   { id: "sprout", name: "Sprout", note: "Sleepy seedling" },
@@ -120,18 +188,59 @@ function defaultStore(): Store {
   return { theme: "default", creature: "bean", music: false, days: {} };
 }
 
+function cleanItems(value: unknown): LogItem[] {
+  if (!Array.isArray(value)) return [];
+  const out: LogItem[] = [];
+  value.forEach((raw: unknown, i: number) => {
+    if (!raw || typeof raw !== "object") return;
+    const r = raw as Record<string, unknown>;
+    const text = typeof r.text === "string" ? r.text : "";
+    if (!text.trim()) return;
+    const item: LogItem = {
+      id: typeof r.id === "string" && r.id ? r.id : "m" + i + Math.random().toString(36).slice(2, 7),
+      text,
+      custom: r.custom === true,
+    };
+    if (isBlockId(r.block)) item.block = r.block;
+    out.push(item);
+  });
+  return out;
+}
+
+// Accepts any older save shape; keeps every day and every item (items without a block still count).
+function cleanDays(value: unknown): Record<string, DayLogs> {
+  const days: Record<string, DayLogs> = {};
+  if (!value || typeof value !== "object") return days;
+  const source = value as Record<string, unknown>;
+  Object.keys(source).forEach((key: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return;
+    const day = (source[key] && typeof source[key] === "object" ? source[key] : {}) as Record<string, unknown>;
+    days[key] = { should: cleanItems(day.should), could: cleanItems(day.could), shouldnt: cleanItems(day.shouldnt) };
+  });
+  return days;
+}
+
 function loadStore(): Store {
+  let raw: string | null = null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultStore();
-    const parsed = JSON.parse(raw) as Store;
+    const parsed = JSON.parse(raw) as Partial<Store>;
+    const themeOk = parsed.theme === "default" || parsed.theme === "warm" || parsed.theme === "night" || parsed.theme === "soft";
+    const creatureOk = parsed.creature === "bean" || parsed.creature === "sprout" || parsed.creature === "ember";
     return {
-      theme: parsed.theme || "default",
-      creature: parsed.creature || "bean",
+      theme: themeOk && parsed.theme ? parsed.theme : "default",
+      creature: creatureOk && parsed.creature ? parsed.creature : "bean",
       music: !!parsed.music,
-      days: parsed.days && typeof parsed.days === "object" ? parsed.days : {},
+      days: cleanDays(parsed.days),
     };
   } catch {
+    // Never silently lose a save we could not read: keep a copy before starting fresh.
+    try {
+      if (raw) localStorage.setItem(STORAGE_KEY + "-backup-" + Date.now(), raw);
+    } catch {
+      // storage blocked
+    }
     return defaultStore();
   }
 }
@@ -1096,6 +1205,7 @@ export default function App() {
   const [view, setView] = useState<View>("home");
   const [draft, setDraft] = useState("");
   const [settings, setSettings] = useState(false);
+  const [openBlock, setOpenBlock] = useState<BlockId | null>(null);
 
   const today = todayKey();
   const logs = store.days[viewDate] || emptyLogs();
@@ -1189,68 +1299,49 @@ export default function App() {
     return "Shouldn't";
   };
 
-  const updateLogs = (next: DayLogs) => {
-    setStore((prev: Store) => ({
-      ...prev,
-      days: { ...prev.days, [viewDate]: next },
-    }));
+  const mutateLane = (lane: Lane, fn: (items: LogItem[]) => LogItem[]) => {
+    const key = viewDate;
+    setStore((prev: Store) => {
+      const current = prev.days[key] || emptyLogs();
+      return { ...prev, days: { ...prev.days, [key]: { ...current, [lane]: fn(current[lane]) } } };
+    });
   };
 
   const openLane = (lane: Lane) => {
-    if (selected !== lane || view === "home") {
-      setSelected(lane);
-      setDraft("");
-      setView(logs[lane].length > 0 ? "list" : "edit");
+    if (selected === lane && view !== "home") {
+      closeHome();
       return;
     }
-    if (view === "list") {
-      setDraft("");
-      setView("edit");
-      return;
-    }
-    setSelected(null);
-    setView("home");
+    setSelected(lane);
     setDraft("");
+    setView("list");
+    setOpenBlock(null);
   };
 
   const closeHome = () => {
     setSelected(null);
     setView("home");
     setDraft("");
+    setOpenBlock(null);
   };
 
-  const addText = (lane: Lane, text: string, custom: boolean) => {
+  const addText = (lane: Lane, text: string, custom: boolean, block: BlockId) => {
     const cleaned = text.trim();
     if (!cleaned) return;
-    const current = store.days[viewDate] || emptyLogs();
-    if (current[lane].some((item: LogItem) => item.text.toLowerCase() === cleaned.toLowerCase())) return;
-    updateLogs({
-      ...current,
-      [lane]: [...current[lane], { id: newId(), text: cleaned, custom }],
-    });
+    mutateLane(lane, (items: LogItem[]) =>
+      items.some((item: LogItem) => item.text.trim().toLowerCase() === cleaned.toLowerCase())
+        ? items
+        : [...items, { id: newId(), text: cleaned, custom, block }],
+    );
   };
 
   const removeItem = (lane: Lane, id: string) => {
-    const current = store.days[viewDate] || emptyLogs();
-    updateLogs({
-      ...current,
-      [lane]: current[lane].filter((item: LogItem) => item.id !== id),
-    });
+    mutateLane(lane, (items: LogItem[]) => items.filter((item: LogItem) => item.id !== id));
   };
 
-  const toggleOption = (lane: Lane, text: string) => {
-    const current = store.days[viewDate] || emptyLogs();
-    const existing = current[lane].find((item: LogItem) => item.text === text);
-    if (existing) {
-      removeItem(lane, existing.id);
-      return;
-    }
-    addText(lane, text, false);
-  };
-
-  const submitDraft = () => {
+  const submitDraft = (block: BlockId) => {
     if (!selected) return;
-    addText(selected, draft, true);
+    addText(selected, draft, true, block);
     setDraft("");
   };
 
@@ -1371,9 +1462,289 @@ export default function App() {
   );
 
   const logged = selected ? logs[selected] : [];
-  const options = selected ? OPTIONS[selected] : [];
+  const editing = view === "edit";
   const color = selected ? laneColor(selected) : theme.text.primary;
-  const tint = selected ? laneTint(selected) : theme.fill.accentSubtle;
+  const unblocked = selected ? logged.filter((item: LogItem) => blockOf(selected, item) === null) : [];
+
+  const pill = (label: string, onClick: () => void, strong: boolean) => (
+    <button
+      onClick={onClick}
+      style={{
+        minHeight: 40,
+        padding: "8px 16px",
+        borderRadius: theme.radius.full,
+        border: "1px solid " + (strong ? color : theme.border.default),
+        background: strong ? color : theme.bg.base,
+        color: strong ? theme.text.onColor : theme.text.primary,
+        fontFamily: font,
+        ...theme.font.label,
+        fontWeight: theme.weight.semibold,
+        cursor: "pointer",
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  const checkMark = (
+    <span
+      style={{
+        width: 22,
+        height: 22,
+        borderRadius: theme.radius.full,
+        background: color,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flex: "0 0 auto",
+      }}
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+        <path d="M2.5 6.2 L5 8.6 L9.6 3.6" fill="none" stroke={theme.text.onColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  );
+
+  const removeButton = (lane: Lane, item: LogItem) => (
+    <button
+      onClick={() => removeItem(lane, item.id)}
+      aria-label={"Remove " + item.text}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        minHeight: 38,
+        padding: "6px 14px 6px 10px",
+        borderRadius: theme.radius.full,
+        border: "1px solid " + theme.text.danger,
+        background: theme.text.danger,
+        color: theme.text.onColor,
+        fontFamily: font,
+        ...theme.font.label,
+        fontWeight: theme.weight.semibold,
+        cursor: "pointer",
+        flex: "0 0 auto",
+      }}
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+        <path d="M3 3 L9 9 M9 3 L3 9" stroke={theme.text.onColor} strokeWidth="2" strokeLinecap="round" />
+      </svg>
+      Remove
+    </button>
+  );
+
+  const loggedRow = (lane: Lane, item: LogItem, context: BlockId | null) => {
+    const where = blockOf(lane, item);
+    const elsewhere = context && where && where !== context ? blockName(where) : null;
+    return (
+      <div
+        key={item.id + (context || "")}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          minHeight: 48,
+          padding: "8px 10px 8px 12px",
+          borderRadius: theme.radius.lg,
+          border: "1.5px solid " + (editing ? theme.text.danger : color),
+          background: editing ? theme.fill.dangerSubtle : laneTint(lane),
+        }}
+      >
+        {checkMark}
+        <span style={{ flex: "1 1 0", minWidth: 0, overflowWrap: "anywhere" }}>
+          <span style={{ display: "block", ...theme.font.body1 }}>{item.text}</span>
+          {elsewhere ? (
+            <span style={{ display: "block", ...theme.font.caption, color: theme.text.secondary }}>Logged in {elsewhere}</span>
+          ) : null}
+        </span>
+        {editing ? (
+          removeButton(lane, item)
+        ) : (
+          <span style={{ ...theme.font.label, fontWeight: theme.weight.semibold, color, flex: "0 0 auto" }}>Logged</span>
+        )}
+      </div>
+    );
+  };
+
+  const optionRow = (lane: Lane, block: BlockId, text: string) => {
+    const hit = logs[lane].find((item: LogItem) => item.text.trim().toLowerCase() === text.toLowerCase());
+    if (hit) return loggedRow(lane, hit, block);
+    return (
+      <button
+        key={text}
+        onClick={() => addText(lane, text, false, block)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          width: "100%",
+          minHeight: 48,
+          padding: "10px 12px",
+          borderRadius: theme.radius.lg,
+          border: "1px solid " + theme.border.default,
+          background: theme.bg.elevated,
+          color: theme.text.primary,
+          fontFamily: font,
+          textAlign: "left",
+          cursor: "pointer",
+        }}
+      >
+        <span
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: theme.radius.full,
+            border: "2px solid " + theme.border.strong,
+            flex: "0 0 auto",
+            boxSizing: "border-box",
+          }}
+        />
+        <span style={{ flex: "1 1 auto", minWidth: 0, ...theme.font.body1 }}>{text}</span>
+      </button>
+    );
+  };
+
+  const blockCard = (lane: Lane, b: BlockDef) => {
+    const items = logs[lane].filter((item: LogItem) => blockOf(lane, item) === b.id);
+    const options = BLOCK_OPTIONS[lane][b.id];
+    const extras = items.filter(
+      (item: LogItem) => !options.some((t: string) => t.toLowerCase() === item.text.trim().toLowerCase()),
+    );
+    const open = openBlock === b.id;
+    return (
+      <div
+        key={b.id}
+        style={{
+          borderRadius: theme.radius.lg,
+          border: "1px solid " + (open ? color : theme.border.default),
+          background: theme.bg.base,
+          overflow: "hidden",
+        }}
+      >
+        <button
+          onClick={() => {
+            setOpenBlock(open ? null : b.id);
+            setDraft("");
+          }}
+          aria-expanded={open}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            width: "100%",
+            minHeight: 60,
+            padding: "10px 14px",
+            background: "transparent",
+            border: "none",
+            color: theme.text.primary,
+            fontFamily: font,
+            textAlign: "left",
+            cursor: "pointer",
+          }}
+        >
+          <span style={{ flex: "1 1 auto", minWidth: 0 }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 8, ...theme.font.body1, fontWeight: theme.weight.semibold }}>
+              {b.name}
+              {viewDate === today && currentBlock() === b.id ? (
+                <span
+                  style={{
+                    ...theme.font.caption,
+                    fontWeight: theme.weight.semibold,
+                    color,
+                    border: "1px solid " + color,
+                    borderRadius: theme.radius.full,
+                    padding: "0 8px",
+                  }}
+                >
+                  Now
+                </span>
+              ) : null}
+            </span>
+            <span style={{ display: "block", ...theme.font.caption, color: theme.text.tertiary }}>{b.time}</span>
+          </span>
+          {items.length > 0 ? (
+            <span
+              style={{
+                minWidth: 26,
+                height: 26,
+                padding: "0 8px",
+                boxSizing: "border-box",
+                borderRadius: theme.radius.full,
+                background: color,
+                color: theme.text.onColor,
+                ...theme.font.label,
+                fontWeight: theme.weight.semibold,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {items.length}
+            </span>
+          ) : null}
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            aria-hidden="true"
+            style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms ease", flex: "0 0 auto" }}
+          >
+            <path d="M4 6 L8 10 L12 6" fill="none" stroke={theme.text.secondary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        {!open && items.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "0 10px 10px" }}>
+            {items.map((item: LogItem) => loggedRow(lane, item, null))}
+          </div>
+        ) : null}
+        {open ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "0 10px 12px", animation: "dcIn 220ms ease" }}>
+            {options.map((text: string) => optionRow(lane, b.id, text))}
+            {extras.map((item: LogItem) => loggedRow(lane, item, b.id))}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+              <input
+                value={draft}
+                placeholder="Add your own"
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setDraft(e.target.value)}
+                onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+                  if (e.key === "Enter") submitDraft(b.id);
+                }}
+                style={{
+                  flex: "1 1 200px",
+                  minWidth: 0,
+                  minHeight: 46,
+                  padding: "10px 12px",
+                  borderRadius: theme.radius.lg,
+                  border: "1px solid " + theme.border.default,
+                  background: theme.bg.elevated,
+                  color: theme.text.primary,
+                  fontFamily: font,
+                  ...theme.font.body1,
+                }}
+              />
+              <button
+                onClick={() => submitDraft(b.id)}
+                style={{
+                  minHeight: 46,
+                  padding: "10px 18px",
+                  borderRadius: theme.radius.lg,
+                  border: "1px solid " + color,
+                  background: color,
+                  color: theme.text.onColor,
+                  fontFamily: font,
+                  ...theme.font.label,
+                  fontWeight: theme.weight.semibold,
+                  cursor: "pointer",
+                }}
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
 
   return (
     <div
@@ -1554,236 +1925,61 @@ export default function App() {
           {counter("shouldnt", avoidN)}
         </div>
 
-        {selected && view === "list" ? (
+        {selected ? (
           <section
             style={{
               width: "100%",
               boxSizing: "border-box",
               borderRadius: theme.radius.xl,
-              border: "1px solid " + theme.border.default,
+              border: "1px solid " + (editing ? theme.text.danger : theme.border.default),
               background: theme.bg.elevated,
-              padding: "18px 18px 16px",
+              padding: "18px 14px 14px",
               animation: "dcIn 260ms ease",
             }}
           >
-            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-              <div style={{ ...theme.font.heading3, fontWeight: theme.weight.semibold, color }}>
-                {laneTitle(selected)} logged
-              </div>
-              <button
-                onClick={() => setView("edit")}
-                style={{
-                  minHeight: 40,
-                  padding: "8px 14px",
-                  borderRadius: theme.radius.full,
-                  border: "1px solid " + theme.border.default,
-                  background: theme.bg.base,
-                  color: theme.text.primary,
-                  fontFamily: font,
-                  ...theme.font.label,
-                  cursor: "pointer",
-                }}
-              >
-                Add or change
-              </button>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14, maxHeight: 240, overflowY: "auto" }}>
-              {logged.map((item: LogItem) => (
-                <div
-                  key={item.id}
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    alignItems: "center",
-                    gap: 10,
-                    minHeight: 48,
-                    padding: "10px 12px",
-                    borderRadius: theme.radius.lg,
-                    border: "1px solid " + theme.border.subtle,
-                    background: theme.bg.base,
-                  }}
-                >
-                  <span style={{ flex: "1 1 180px", minWidth: 0, ...theme.font.body1 }}>{item.text}</span>
-                  <button
-                    onClick={() => removeItem(selected, item.id)}
-                    style={{
-                      minHeight: 36,
-                      padding: "6px 12px",
-                      borderRadius: theme.radius.full,
-                      border: "1px solid " + theme.border.default,
-                      background: theme.bg.elevated,
-                      color: theme.text.secondary,
-                      fontFamily: font,
-                      ...theme.font.label,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        {selected && view === "edit" ? (
-          <section
-            style={{
-              width: "100%",
-              boxSizing: "border-box",
-              borderRadius: theme.radius.xl,
-              border: "1px solid " + theme.border.default,
-              background: theme.bg.elevated,
-              padding: "18px 18px 16px",
-              animation: "dcIn 260ms ease",
-            }}
-          >
-            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-              <div>
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+              <div style={{ flex: "1 1 180px", minWidth: 0 }}>
                 <div style={{ ...theme.font.heading3, fontWeight: theme.weight.semibold, color }}>
-                  Log a {laneTitle(selected).toLowerCase()}
+                  {editing ? "Change your " + laneTitle(selected) + " logs" : laneTitle(selected)}
                 </div>
                 <div style={{ ...theme.font.caption, color: theme.text.secondary, marginTop: 4 }}>
-                  Pick from your list, or type something that isn't here.
+                  {editing
+                    ? "Tap Remove on anything you want off this day."
+                    : logged.length > 0
+                      ? logged.length + " logged · tap a time block to add more"
+                      : "Tap a time block to log what you did."}
                 </div>
               </div>
-              <button
-                onClick={() => (logged.length > 0 ? setView("list") : closeHome())}
-                style={{
-                  minHeight: 40,
-                  padding: "8px 14px",
-                  borderRadius: theme.radius.full,
-                  border: "1px solid " + theme.border.default,
-                  background: theme.bg.base,
-                  color: theme.text.primary,
-                  fontFamily: font,
-                  ...theme.font.label,
-                  cursor: "pointer",
-                }}
-              >
-                Done
-              </button>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16, maxHeight: 220, overflowY: "auto" }}>
-              {options.map((text: string) => {
-                const on = logged.some((item: LogItem) => item.text === text);
-                return (
-                  <button
-                    key={text}
-                    onClick={() => toggleOption(selected, text)}
-                    aria-pressed={on}
-                    style={{
-                      display: "flex",
-                      flexWrap: "wrap",
-                      alignItems: "center",
-                      gap: 10,
-                      width: "100%",
-                      minHeight: 48,
-                      padding: "10px 12px",
-                      borderRadius: theme.radius.lg,
-                      border: "1px solid " + (on ? color : theme.border.default),
-                      background: on ? tint : theme.bg.base,
-                      color: theme.text.primary,
-                      fontFamily: font,
-                      textAlign: "left",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: 18,
-                        height: 18,
-                        borderRadius: theme.radius.full,
-                        border: "2px solid " + (on ? color : theme.border.strong),
-                        background: on ? color : "transparent",
-                        flex: "0 0 auto",
-                      }}
-                    />
-                    <span style={{ flex: "1 1 180px", minWidth: 0, ...theme.font.body1 }}>{text}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 16 }}>
-              <input
-                value={draft}
-                placeholder="Type an activity that isn't listed"
-                onChange={(e: ChangeEvent<HTMLInputElement>) => setDraft(e.target.value)}
-                onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
-                  if (e.key === "Enter") submitDraft();
-                }}
-                style={{
-                  flex: "1 1 220px",
-                  minWidth: 0,
-                  minHeight: 44,
-                  padding: "10px 12px",
-                  borderRadius: theme.radius.lg,
-                  border: "1px solid " + theme.border.default,
-                  background: theme.bg.base,
-                  color: theme.text.primary,
-                  fontFamily: font,
-                  ...theme.font.body1,
-                }}
-              />
-              <button
-                onClick={submitDraft}
-                style={{
-                  minHeight: 44,
-                  padding: "10px 16px",
-                  borderRadius: theme.radius.lg,
-                  border: "1px solid " + color,
-                  background: color,
-                  color: theme.text.onColor,
-                  fontFamily: font,
-                  ...theme.font.label,
-                  fontWeight: theme.weight.semibold,
-                  cursor: "pointer",
-                }}
-              >
-                Add
-              </button>
-            </div>
-            {logged.length > 0 ? (
-              <div style={{ marginTop: 18 }}>
-                <div style={{ ...theme.font.label, color: theme.text.tertiary, marginBottom: 8 }}>Logged now</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {logged.map((item: LogItem) => (
-                    <div
-                      key={item.id}
-                      style={{
-                        display: "flex",
-                        flexWrap: "wrap",
-                        alignItems: "center",
-                        gap: 10,
-                        minHeight: 44,
-                        padding: "8px 12px",
-                        borderRadius: theme.radius.lg,
-                        border: "1px solid " + theme.border.subtle,
-                        background: theme.bg.base,
-                      }}
-                    >
-                      <span style={{ flex: "1 1 180px", minWidth: 0, ...theme.font.body1 }}>{item.text}</span>
-                      <button
-                        onClick={() => removeItem(selected, item.id)}
-                        style={{
-                          minHeight: 36,
-                          padding: "6px 12px",
-                          borderRadius: theme.radius.full,
-                          border: "1px solid " + theme.border.default,
-                          background: theme.bg.elevated,
-                          color: theme.text.secondary,
-                          fontFamily: font,
-                          ...theme.font.label,
-                          cursor: "pointer",
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  ))}
-                </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {editing
+                  ? pill("Done", () => setView("list"), true)
+                  : logged.length > 0
+                    ? pill("Add or change", () => setView("edit"), false)
+                    : null}
+                {editing ? null : pill("Close", closeHome, false)}
               </div>
-            ) : null}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
+              {BLOCKS.map((b: BlockDef) => blockCard(selected, b))}
+              {unblocked.length > 0 ? (
+                <div
+                  style={{
+                    borderRadius: theme.radius.lg,
+                    border: "1px solid " + theme.border.default,
+                    background: theme.bg.base,
+                    padding: "10px 10px 10px",
+                  }}
+                >
+                  <div style={{ padding: "2px 4px 8px" }}>
+                    <div style={{ ...theme.font.body1, fontWeight: theme.weight.semibold }}>Anytime</div>
+                    <div style={{ ...theme.font.caption, color: theme.text.tertiary }}>Logged before time blocks existed</div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {unblocked.map((item: LogItem) => loggedRow(selected, item, null))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </section>
         ) : null}
 

@@ -1,5 +1,5 @@
 // DayCraft offline support: cache the app shell and every same-origin file it loads.
-const CACHE = "daycraft-v1-shell-2";
+const CACHE = "daycraft-v1-shell-3";
 const SHELL = ["./", "./index.html", "./manifest.json", "./icons/apple-touch-icon.png", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
