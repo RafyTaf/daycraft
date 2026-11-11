@@ -66,6 +66,7 @@ const OPTIONS: Record<Lane, string[]> = {
     "Practice golf",
     "Evolve your trading strategy",
     "Knock out a quick chore if you have extra time",
+    "Practice swing at home (saved in YT)",
   ],
   shouldnt: [
     "First rip before 7:30pm",
@@ -104,10 +105,10 @@ const BLOCK_OPTIONS: Record<Lane, Record<BlockId, string[]>> = {
     home: pick(OPTIONS.should, [13, 14]),
   },
   could: {
-    morning: pick(OPTIONS.could, [7]),
-    market: pick(OPTIONS.could, [0, 1, 6]),
-    afternoon: pick(OPTIONS.could, [3, 4, 5, 7]),
-    home: pick(OPTIONS.could, [2]),
+    morning: pick(OPTIONS.could, [7, 8]),
+    market: pick(OPTIONS.could, [0, 1, 6, 8]),
+    afternoon: pick(OPTIONS.could, [3, 4, 5, 7, 8]),
+    home: pick(OPTIONS.could, [2, 8]),
   },
   shouldnt: {
     morning: pick(OPTIONS.shouldnt, [0, 1, 2, 6]),
