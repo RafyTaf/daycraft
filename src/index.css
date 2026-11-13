@@ -3,9 +3,9 @@ html, body { margin: 0; padding: 0; min-height: 100%; }
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  background: #ffffff;
+  background: #F3F1EC;
 }
-@media (prefers-color-scheme: dark) { html { background: #111114; } }
+@media (prefers-color-scheme: dark) { html { background: #12110F; } }
 body {
   min-height: 100dvh;
   overscroll-behavior: none;
@@ -15,7 +15,72 @@ body {
   user-select: none;
   -webkit-touch-callout: none;
 }
-input, textarea { -webkit-user-select: text; user-select: text; font-size: 16px; }
-button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
-button:active { opacity: 0.85; }
+input, textarea { -webkit-user-select: text; user-select: text; font-size: 16px !important; }
+button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; font: inherit; }
 #root { min-height: 100dvh; }
+
+@keyframes dcPop {
+  0% { transform: scale(0.62); }
+  55% { transform: scale(1.14); }
+  100% { transform: scale(1); }
+}
+@keyframes dcCheckDraw {
+  from { stroke-dashoffset: 20; }
+  to { stroke-dashoffset: 0; }
+}
+.dc-check-draw {
+  stroke-dasharray: 20;
+  stroke-dashoffset: 0;
+  animation: dcCheckDraw 280ms ease forwards;
+}
+@keyframes dcIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes dcFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes dcSheet {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes dcToast {
+  0% { opacity: 0; transform: translate(-50%, 16px) scale(0.94); }
+  12% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  82% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -8px) scale(0.98); }
+}
+@keyframes dcFloatUp {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-18px); }
+}
+@keyframes dcJarPulse {
+  0%, 100% { transform: scale(1); }
+  40% { transform: scale(1.1); }
+}
+@keyframes dcLinkIn {
+  0% { transform: scale(0.4) rotate(-18deg); opacity: 0; }
+  62% { transform: scale(1.12) rotate(5deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+@keyframes dcCoinArc {
+  0% { transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }
+  70% { transform: translate(var(--dx), var(--dy)) scale(0.85) rotate(200deg); opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(0.25) rotate(300deg); opacity: 0; }
+}
+@keyframes dcPulseRing {
+  0%, 100% { box-shadow: 0 0 0 0 var(--ring); }
+  50% { box-shadow: 0 0 0 4px var(--ring); }
+}
+@keyframes dcBar {
+  from { width: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

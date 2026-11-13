@@ -1,14 +1,14 @@
 {
   "name": "DayCraft",
   "short_name": "DayCraft",
-  "description": "Log your Shoulds, Coulds and Shouldn'ts, and keep your little creature healthy.",
+  "description": "Check off your day. Link the chain.",
   "start_url": "/daycraft/",
   "scope": "/daycraft/",
   "id": "/daycraft/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#EEF3FF",
-  "theme_color": "#FFFFFF",
+  "background_color": "#F3F1EC",
+  "theme_color": "#F3F1EC",
   "icons": [
     {
       "src": "/daycraft/icons/icon-192.png",

@@ -1,10 +1,22 @@
 import puppeteer from "puppeteer-core";
+import { mkdirSync } from "fs";
+
 const URL = process.env.DC_URL || "http://localhost:4174/daycraft/";
+const SHOT = process.env.DC_SHOTDIR || "shots";
+mkdirSync(SHOT, { recursive: true });
 const errors = [];
 const results = {};
 const browser = await puppeteer.launch({ executablePath: "/usr/bin/google-chrome", headless: "new", args: ["--no-sandbox"] });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const today = (() => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); })();
+const today = (() => {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+})();
+const addDays = (key, n) => {
+  const [y, m, d] = key.split("-").map(Number);
+  const dt = new Date(y, m - 1, d + n);
+  return dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0");
+};
 
 async function newPage(scheme) {
   const page = await browser.newPage();
@@ -22,106 +34,205 @@ const clickText = async (page, sel, text, exact = false) => {
     return !!el;
   }, sel, text, exact);
   if (!ok) throw new Error("not found: " + text);
-  await sleep(450);
+  await sleep(350);
 };
-const counts = (page) => page.evaluate(() => [...document.querySelectorAll("button[aria-pressed]")].slice(0, 3).map((b) => b.textContent));
-const removeCount = (page) => page.evaluate(() => document.querySelectorAll('button[aria-label^="Remove "]').length);
-const scrollToText = (page, text) => page.evaluate((text) => { const el = [...document.querySelectorAll("div,button")].reverse().find((b) => b.textContent.includes(text)); el && el.scrollIntoView({ block: "start" }); window.scrollBy(0, -12); }, text);
+const clickLabel = async (page, text) => {
+  const ok = await page.evaluate((text) => {
+    const el = [...document.querySelectorAll("button")].find((b) => (b.getAttribute("aria-label") || "").includes(text));
+    if (el) { el.scrollIntoView({ block: "center" }); el.click(); }
+    return !!el;
+  }, text);
+  if (!ok) throw new Error("label not found: " + text);
+  await sleep(350);
+};
 
-// 1) MIGRATION: seed an old-format save (no blocks), plus an older day
+// 0) Welcome + old storage left intact
 const p = await newPage("light");
 await p.goto(URL, { waitUntil: "networkidle0" });
-const old = { theme: "default", creature: "bean", music: false, days: {
-  [today]: { should: [{ id: "a1", text: "Brush your teeth", custom: false }, { id: "a2", text: "Called mom", custom: true }], could: [], shouldnt: [{ id: "a3", text: "First rip before 7:30pm", custom: false }] },
-  "2026-11-02": { should: [{ id: "b1", text: "Pray", custom: false }], could: [{ id: "b2", text: "Practice golf", custom: false }] },
-} };
-await p.evaluate((o) => localStorage.setItem("daycraft-v1", JSON.stringify(o)), old);
+await p.evaluate(() => {
+  localStorage.setItem("daycraft-v1", JSON.stringify({ theme: "default", creature: "bean", days: { "2026-11-09": { should: [{ id: "a", text: "Pray", custom: false }], could: [], shouldnt: [] } } }));
+});
 await p.reload({ waitUntil: "networkidle0" });
-await sleep(1000);
-results.migratedCounts = await counts(p);
-await clickText(p, "button", "SHOULD");
-results.migratedShouldShows = await p.evaluate(() => { const t = document.body.innerText; return t.includes("Brush your teeth") && t.includes("Called mom") && t.includes("Anytime"); });
-results.migratedOldDayKept = await p.evaluate(() => !!JSON.parse(localStorage.getItem("daycraft-v1")).days["2026-11-02"].could.length);
-results.removeButtonsInBaseView = await removeCount(p);
-await clickText(p, "button", "Close", true);
-await p.evaluate(() => localStorage.removeItem("daycraft-v1"));
-await p.reload({ waitUntil: "networkidle0" });
-await sleep(1000);
+await sleep(600);
+results.welcome = await p.evaluate(() => document.body.innerText.includes("This is your day"));
+await p.screenshot({ path: SHOT + "/20-welcome-light.png" });
+await clickText(p, "button", "Begin", true);
+await sleep(500);
+results.afterBegin = await p.evaluate(() => document.body.innerText.includes("Morning") && document.body.innerText.includes("Market hours"));
+results.legacyUntouched = await p.evaluate(() => {
+  const raw = localStorage.getItem("daycraft-v1");
+  return raw && raw.includes("Pray") && raw.includes("2026-11-09");
+});
+results.newKeyUsed = await p.evaluate(() => !!localStorage.getItem("daycraft-habits-v1"));
+await p.screenshot({ path: SHOT + "/21-today-fresh-light.png" });
 
-// 2) NORMAL FLOW, light
-await p.screenshot({ path: "shots/01-home-light.png" });
-await clickText(p, "button", "SHOULD");
+// expand all blocks and check morning required
+const morning = ["After I pee, I brush my teeth.", "After I feed Hazel", "After I pray, I check the charts", "short controlled phone break", "I cook breakfast", "move to the computer"];
+for (const t of morning) {
+  await clickLabel(p, t);
+}
+// meal chip
+await clickText(p, "button", "Eggs & toast");
+await p.evaluate(() => { const el = [...document.querySelectorAll("button")].find((b) => b.textContent.includes("Morning")); el && el.scrollIntoView({ block: "start" }); });
 await sleep(300);
-await scrollToText(p, "Should");
-await p.screenshot({ path: "shots/09-block-menu-light.png" });
-await clickText(p, "button", "Morning");
-await clickText(p, "button", "Brush your teeth");
-await clickText(p, "button", "Pray");
-results.loggedMarkedInBlock = await p.evaluate(() => [...document.querySelectorAll("div")].some((d) => d.textContent.trim().startsWith("Brush your teeth") === false && d.textContent.includes("Brush your teeth") && d.textContent.includes("Logged")));
-await scrollToText(p, "Morning");
-await p.screenshot({ path: "shots/09b-block-open-light.png" });
-// custom in Home stretch
-await clickText(p, "button", "Home stretch");
-await p.type("input", "Read 10 pages");
-await clickText(p, "button", "Add", true);
-results.removeButtonsBaseAfterLogging = await removeCount(p);
-await clickText(p, "button", "Home stretch"); // collapse
-await scrollToText(p, "Should");
-await p.screenshot({ path: "shots/08-base-view-light.png" });
-await clickText(p, "button", "Add or change");
-results.removeButtonsEditMode = await removeCount(p);
-await scrollToText(p, "Change your");
-await p.screenshot({ path: "shots/10-edit-mode-light.png" });
-await p.click('button[aria-label="Remove Pray"]');
+await p.screenshot({ path: SHOT + "/22-morning-done-light.png" });
+
+// market: open sheet, working
+await clickLabel(p, "If I'm not busy working or trading");
 await sleep(400);
-results.afterRemoveShould = await counts(p);
-await clickText(p, "button", "Done", true);
-await clickText(p, "button", "COULD");
-await clickText(p, "button", "Afternoon");
-await clickText(p, "button", "Practice golf");
-await clickText(p, "button", "Close", true);
-results.beforeReload = await p.evaluate(() => localStorage.getItem("daycraft-v1"));
+await p.screenshot({ path: SHOT + "/23-freestyle-sheet-light.png" });
+await clickText(p, "button", "I was working or trading");
+await sleep(300);
+
+// afternoon required
+await clickLabel(p, "At 12, I cook lunch");
+await clickLabel(p, "catch up on work and emails");
+await clickLabel(p, "I walk Hazel");
+await clickLabel(p, "If I'm caught up");
+await sleep(300);
+await clickText(p, "button", "Practice golf swing at home");
+await sleep(400);
+// should NOT be complete yet? Wait - all required should be done after aft-fs. Gym is not required. Day should be linked!
+results.linkedAfterRequired = await p.evaluate(() => document.body.innerText.includes("is linked") || document.body.innerText.includes("Today is linked"));
+await p.screenshot({ path: SHOT + "/24-day-linked-light.png" });
+
+// extra credit
+const beforeJar = await p.evaluate(() => JSON.parse(localStorage.getItem("daycraft-habits-v1")).jar.earned);
+await clickText(p, "button", "Can I do one more?");
+await sleep(300);
+await clickText(p, "button", "Read Berserk manga");
+await sleep(700);
+const afterJar = await p.evaluate(() => JSON.parse(localStorage.getItem("daycraft-habits-v1")).jar.earned);
+results.extraCredit = afterJar - beforeJar;
+results.perExtra = await p.evaluate(() => JSON.parse(localStorage.getItem("daycraft-habits-v1")).jar.perExtra);
+await p.screenshot({ path: SHOT + "/25-extra-credit-light.png" });
+
+// gym optional — still linked without needing it; check gym
+await p.evaluate(() => { const el = [...document.querySelectorAll("button")].find((b) => b.textContent.trim().startsWith("Home stretch") || b.textContent.includes("Home stretch")); el && (el.scrollIntoView({block:"center"}), el.getAttribute("aria-expanded")==="false" && el.click()); });
+await new Promise((r) => setTimeout(r, 400));
+await clickLabel(p, "building gym");
+results.stillLinkedWithGym = await p.evaluate(() => document.body.innerText.includes("linked"));
+results.gymWeek = await p.evaluate(() => document.body.innerText.includes("Gym 1/5"));
+
+// persistence
 await p.reload({ waitUntil: "networkidle0" });
-await sleep(1000);
-results.afterReloadCounts = await counts(p);
-results.swControlled = await p.evaluate(async () => { await navigator.serviceWorker.ready; return !!navigator.serviceWorker.controller || "ready-not-controlling"; });
+await sleep(700);
+results.afterReloadLinked = await p.evaluate(() => document.body.innerText.includes("Today is linked") || document.body.innerText.includes("is linked"));
+results.afterReloadSwing = await p.evaluate(() => {
+  const s = JSON.parse(localStorage.getItem("daycraft-habits-v1"));
+  const day = s.days[Object.keys(s.days).sort().pop()];
+  const texts = (day.freestyle || []).map((f) => f.text).join(" ");
+  return texts.includes("Practice golf swing") && texts.includes("Berserk");
+});
+results.legacyStill = await p.evaluate(() => localStorage.getItem("daycraft-v1").includes("Pray"));
+
+// jar page
+await clickText(p, "button", "Treat jar").catch(() => clickText(p, "button", "Jar"));
+await sleep(400);
+// nav Jar
+await p.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Jar").click());
+await sleep(500);
+await p.screenshot({ path: SHOT + "/26-jar-light.png" });
+results.jarShowsCredit = await p.evaluate(() => document.body.innerText.includes("$5"));
+
+// calendar
+await p.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Calendar").click());
+await sleep(500);
+await p.screenshot({ path: SHOT + "/27-calendar-light.png" });
+results.calendarHasLink = await p.evaluate(() => document.body.innerText.includes("Your chain") || document.body.innerText.includes("chain"));
+
+// identity
+await p.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Identity").click());
+await sleep(500);
+await p.screenshot({ path: SHOT + "/28-identity-list-light.png" });
+await clickText(p, "button", "Faith");
+await sleep(400);
+results.faithDesc = await p.evaluate(() => document.body.innerText.includes("God is the foundation"));
+await p.screenshot({ path: SHOT + "/29-identity-faith-light.png" });
+
+// settings + music/sounds
+await p.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Today").click());
+await sleep(400);
+await p.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Settings").click());
+await sleep(400);
+await p.screenshot({ path: SHOT + "/30-settings-light.png" });
+results.soundsDefaultOn = await p.evaluate(() => document.body.innerText.includes("Sounds") && document.body.innerText.includes("On"));
+await clickText(p, "button", "Quiet music");
+await sleep(300);
+results.musicOn = await p.evaluate(() => {
+  const t = [...document.querySelectorAll("button")].find((b) => b.textContent.includes("Quiet music"))?.textContent;
+  return t && t.includes("On");
+});
+await clickText(p, "button", "Quiet music"); // off again
+await clickText(p, "button", "Sounds"); // toggle off then we'll leave? turn back on
+await clickText(p, "button", "Sounds"); // on
+
+// chores
+await p.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Today").click());
+await sleep(200);
+await p.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Chores").click());
+await sleep(400);
+await p.type("input", "Take out recycling");
+await clickLabel(p, "Add chore");
+await sleep(200);
+results.choreAdded = await p.evaluate(() => document.body.innerText.includes("Take out recycling"));
+await p.screenshot({ path: SHOT + "/31-chores-light.png" });
+
+// never miss twice: seed yesterday miss, today incomplete
+const yest = addDays(today, -1);
+await p.evaluate((today, yest) => {
+  const s = JSON.parse(localStorage.getItem("daycraft-habits-v1"));
+  s.started = yest;
+  s.days[today] = { checks: {}, freestyle: [], marketWorked: false, afternoonBusy: false };
+  s.days[yest] = { checks: {}, freestyle: [], marketWorked: false, afternoonBusy: false };
+  localStorage.setItem("daycraft-habits-v1", JSON.stringify(s));
+}, today, yest);
+await p.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Today").click());
+await p.reload({ waitUntil: "networkidle0" });
+await sleep(700);
+results.dontMissTwice = await p.evaluate(() => document.body.innerText.includes("Don't miss twice"));
+await p.screenshot({ path: SHOT + "/32-dont-miss-twice-light.png" });
+
+// SW / offline / overflow
+results.swControlled = await p.evaluate(async () => {
+  await navigator.serviceWorker.ready;
+  return !!navigator.serviceWorker.controller || "ready-not-controlling";
+});
 await p.reload({ waitUntil: "networkidle0" });
 results.swCache = await p.evaluate(async () => (await caches.keys()).join(","));
+results.pageOverflowX = await p.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
 await p.setOfflineMode(true);
 await p.reload({ waitUntil: "domcontentloaded" });
-await sleep(1200);
-results.offlineRenders = await p.evaluate(() => document.body.innerText.includes("DAYCRAFT") && document.body.innerText.includes("SHOULD"));
-results.offlineCountsKept = await counts(p);
+await sleep(1000);
+results.offlineRenders = await p.evaluate(() => document.body.innerText.includes("DayCraft") || document.body.innerText.includes("Morning") || document.body.innerText.includes("chain") || document.body.innerText.includes("Don't miss"));
 await p.setOfflineMode(false);
+results.manifest = await p.evaluate(async () => (await (await fetch("./manifest.json")).json()).display);
+results.metaThemeColor = await p.evaluate(() => document.querySelector('meta[name="theme-color"]').content);
 
-// 3) DARK
+// DARK
 const d = await newPage("dark");
 await d.goto(URL, { waitUntil: "networkidle0" });
-await sleep(1200);
-await d.screenshot({ path: "shots/04-home-dark.png" });
-await clickText(d, "button", "SHOULD");
-await scrollToText(d, "Should");
-await d.screenshot({ path: "shots/08-base-view-dark.png" });
-await clickText(d, "button", "Market hours");
-await scrollToText(d, "Market hours");
-await d.screenshot({ path: "shots/09-block-menu-dark.png" });
-await clickText(d, "button", "Add or change");
-await scrollToText(d, "Change your");
-await d.screenshot({ path: "shots/10-edit-mode-dark.png" });
-await clickText(d, "button", "Done", true);
-await clickText(d, "button", "SHOULDN'T").catch(async () => clickText(d, "button", "SHOULDN"));
-await clickText(d, "button", "Afternoon");
-await scrollToText(d, "Afternoon");
-await d.screenshot({ path: "shots/11-shouldnt-afternoon-dark.png" });
-await clickText(d, "button", "Close", true);
-await d.click('button[aria-label="Settings"]');
-await sleep(500);
-await clickText(d, "button", "Quiet music off");
-results.audioState = await d.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent.includes("Quiet music"))?.textContent);
-await clickText(d, "button", "Quiet music on");
-results.pageOverflowX = await d.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
-results.metaThemeColor = await d.evaluate(() => document.querySelector('meta[name="theme-color"]').content);
-results.manifest = await d.evaluate(async () => (await (await fetch("./manifest.json")).json()).display);
+await sleep(800);
+// already onboarded via shared origin storage — but we just overwrote days. Welcome shouldn't show (onboarded true).
+results.darkHasContent = await d.evaluate(() => document.body.innerText.length > 40);
+await d.screenshot({ path: SHOT + "/40-today-dark.png" });
+await d.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Calendar")?.click());
+await sleep(400);
+await d.screenshot({ path: SHOT + "/41-calendar-dark.png" });
+await d.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Identity")?.click());
+await sleep(400);
+await d.screenshot({ path: SHOT + "/42-identity-dark.png" });
+await d.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Jar")?.click());
+await sleep(400);
+await d.screenshot({ path: SHOT + "/43-jar-dark.png" });
+await d.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Today")?.click());
+await sleep(300);
+// check one item in dark for the red checkbox
+await clickLabel(d, "After I pee, I brush my teeth.");
+await d.evaluate(() => { const el = [...document.querySelectorAll("button")].find((b) => (b.getAttribute("aria-label")||"").includes("brush")); el && el.scrollIntoView({ block: "center" }); });
+await sleep(300);
+await d.screenshot({ path: SHOT + "/44-check-dark.png" });
+results.darkOverflow = await d.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
 
 console.log(JSON.stringify({ results, errors }, null, 2));
 await browser.close();
