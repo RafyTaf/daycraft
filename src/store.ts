@@ -256,7 +256,7 @@ export function loadStore(): Store {
       typeof parsed.started === "string" && /^\d{4}-\d{2}-\d{2}$/.test(parsed.started)
         ? parsed.started
         : todayKey();
-    return {
+    return sanitizeStore({
       v: 1,
       started,
       onboarded: parsed.onboarded === true,
@@ -265,7 +265,7 @@ export function loadStore(): Store {
       days: cleanDays(parsed.days),
       jar: cleanJar(parsed.jar),
       chores: cleanChores(parsed.chores),
-    };
+    });
   } catch {
     try {
       if (raw) localStorage.setItem(STORAGE_KEY + "-backup-" + Date.now(), raw);
@@ -440,3 +440,69 @@ export function FREESTYLE_TEXT(id: string): string {
   const o = FREESTYLE.find((x) => x.id === id);
   return o ? o.text : "";
 }
+
+/** Extras left on a block after the parent line was unchecked — leftover from the Nov 13 undo bug. */
+export function pruneOrphanExtras(store: Store): Store {
+  let changed = false;
+  const days: Record<string, DayState> = {};
+  Object.keys(store.days).forEach((key) => {
+    const day = store.days[key];
+    const marketOk = marketFulfilled(day);
+    const aftOk = afternoonFulfilled(day);
+    const freestyle = day.freestyle.filter((f) => {
+      if (!f.extra) return true;
+      if (f.block === "market") return marketOk;
+      if (f.block === "afternoon") return aftOk;
+      return true;
+    });
+    if (freestyle.length !== day.freestyle.length) {
+      changed = true;
+      days[key] = { ...day, freestyle };
+    } else {
+      days[key] = day;
+    }
+  });
+  return changed ? { ...store, days } : store;
+}
+
+export function extraCount(store: Store): number {
+  let n = 0;
+  Object.keys(store.days).forEach((key) => {
+    n += dayOf(store, key).freestyle.filter((f) => f.extra).length;
+  });
+  return n;
+}
+
+/** Jar earnings come only from extra-credit activities and awarded gym-week bonuses. */
+export function expectedEarned(store: Store): number {
+  const fromExtras = extraCount(store) * store.jar.perExtra;
+  const fromGym = store.jar.gymWeeks.length * store.jar.gymBonus;
+  return Math.round((fromExtras + fromGym) * 100) / 100;
+}
+
+export function reconcileJar(store: Store): Store {
+  const earned = expectedEarned(store);
+  if (earned === store.jar.earned) return store;
+  return { ...store, jar: { ...store.jar, earned } };
+}
+
+/** Prune leftover extras from a botched undo, then set the jar to match what's actually logged. */
+export function sanitizeStore(store: Store): Store {
+  return reconcileJar(pruneOrphanExtras(store));
+}
+
+export function removeExtra(store: Store, key: string, id: string): Store {
+  const day = dayOf(store, key);
+  if (!day.freestyle.some((f) => f.id === id && f.extra)) return store;
+  return reconcileJar(mutateDay(store, key, (d) => ({ ...d, freestyle: d.freestyle.filter((f) => f.id !== id) })));
+}
+
+export function clearBlockFreestyle(day: DayState, block: BlockId, keepExtras: boolean): DayState {
+  return {
+    ...day,
+    marketWorked: block === "market" ? false : day.marketWorked,
+    afternoonBusy: block === "afternoon" ? false : day.afternoonBusy,
+    freestyle: day.freestyle.filter((f) => f.block !== block || (keepExtras && f.extra)),
+  };
+}
+

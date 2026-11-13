@@ -1,6 +1,6 @@
 import type { GrokTheme } from "../grok";
-import { IDENTITIES, WEEKLY, type IdentityId } from "../habits";
-import { ChainLink, IDENTITY_COLOR, IconChevron } from "../icons";
+import { IDENTITIES, WEEKLY, tone, type IdentityId } from "../habits";
+import { ChainLink, IconChevron } from "../icons";
 import {
   addDays,
   dayMark,
@@ -239,8 +239,7 @@ export function IdentityDetail({
 }
 
 function identColor(theme: GrokTheme, id: IdentityId): string {
-  const row = IDENTITY_COLOR[id];
-  return theme.kind === "dark" ? row.dark : row.light;
+  return tone(theme.kind, id).ink;
 }
 
 function backStyle(theme: GrokTheme): React.CSSProperties {

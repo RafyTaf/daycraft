@@ -15,6 +15,8 @@ import {
   mondayOf,
   mutateDay,
   newId,
+  reconcileJar,
+  removeExtra,
   requiredComplete,
   saveStore,
   settleGymBonus,
@@ -26,7 +28,7 @@ import { CalendarPage } from "./ui/Calendar";
 import { ChoresPage } from "./ui/Chores";
 import { IdentityDetail, IdentityList } from "./ui/Identity";
 import { JarPage } from "./ui/Jar";
-import { SettingsPage } from "./ui/Settings";
+import { SettingsPage, SoundPanel } from "./ui/Settings";
 import { FreestyleSheet } from "./ui/Sheet";
 import { Today } from "./ui/Today";
 import { Welcome } from "./ui/Welcome";
@@ -64,6 +66,7 @@ export default function App() {
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [identity, setIdentity] = useState<IdentityId | null>(null);
   const [sheet, setSheet] = useState<Sheet | null>(null);
+  const [soundPanel, setSoundPanel] = useState(false);
   const [fresh, setFresh] = useState<Record<string, boolean>>({});
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [flights, setFlights] = useState<Flight[]>([]);
@@ -159,21 +162,14 @@ export default function App() {
         let next = mutateDay(prev, key, (day) => {
           if (habitId === "market-fs") {
             if (marketFulfilled(day)) {
-              return {
-                ...day,
-                marketWorked: false,
-                freestyle: day.freestyle.filter((f) => f.block !== "market" || f.extra),
-              };
+              // Full reverse: drop this block's required pick AND any extras (and their credit, via reconcile).
+              return { ...day, marketWorked: false, freestyle: day.freestyle.filter((f) => f.block !== "market") };
             }
             return day;
           }
           if (habitId === "aft-fs") {
             if (afternoonFulfilled(day)) {
-              return {
-                ...day,
-                afternoonBusy: false,
-                freestyle: day.freestyle.filter((f) => f.block !== "afternoon" || f.extra),
-              };
+              return { ...day, afternoonBusy: false, freestyle: day.freestyle.filter((f) => f.block !== "afternoon") };
             }
             return day;
           }
@@ -191,7 +187,7 @@ export default function App() {
           return { ...day, checks };
         });
         if (habitId === "gym") next = settleGymBonus(next, key);
-        return next;
+        return reconcileJar(next);
       },
       habitDone(dayOf(store, key), habitId) ? ["undo"] : ["check"],
     );
@@ -224,22 +220,16 @@ export default function App() {
     flash("dinner");
   };
 
-  const creditForExtra = (prev: Store, extra: boolean): Store => {
-    if (!extra) return prev;
-    return { ...prev, jar: { ...prev.jar, earned: prev.jar.earned + prev.jar.perExtra } };
-  };
-
   const addFreestyle = (block: BlockId, optionId: string, text: string, extra: boolean) => {
     const key = viewDate;
     setDay(
       key,
       (prev) =>
-        creditForExtra(
+        reconcileJar(
           mutateDay(prev, key, (day) => {
             const entry: FreestyleEntry = { id: newId(), optionId, text, block, extra, at: Date.now() };
             return { ...day, freestyle: [...day.freestyle, entry] };
           }),
-          extra,
         ),
       extra ? ["check", "coin"] : ["check"],
     );
@@ -265,9 +255,30 @@ export default function App() {
     setSheet(null);
   };
 
+  const onRemoveExtra = (id: string) => {
+    const key = viewDate;
+    const before = store.jar.earned;
+    setDay(key, (prev) => removeExtra(prev, key, id), ["undo"]);
+    const after = removeExtra(store, key, id);
+    if (after.jar.earned < before) {
+      toast(Money(before - after.jar.earned) + " returned", "Taken back out of the jar.");
+    }
+  };
+
   const openFreestyle = (block: BlockId, extra: boolean) => {
     fx("open");
     setSheet({ block, extra });
+  };
+
+  const toggleSounds = () => {
+    wakeAudio();
+    const next = !store.sounds;
+    setStore((s) => ({ ...s, sounds: next }));
+    if (next) playSound("check", true);
+  };
+  const toggleMusic = () => {
+    wakeAudio();
+    setStore((s) => ({ ...s, music: !s.music }));
   };
 
   const pageBg = c.paper;
@@ -311,16 +322,8 @@ export default function App() {
           <SettingsPage
             theme={theme}
             store={store}
-            onToggleSounds={() => {
-              wakeAudio();
-              const next = !store.sounds;
-              setStore((s) => ({ ...s, sounds: next }));
-              if (next) playSound("check", true);
-            }}
-            onToggleMusic={() => {
-              wakeAudio();
-              setStore((s) => ({ ...s, music: !s.music }));
-            }}
+            onToggleSounds={toggleSounds}
+            onToggleMusic={toggleMusic}
             onBack={() => setOverlay(null)}
           />
         ) : overlay === "chores" ? (
@@ -361,8 +364,10 @@ export default function App() {
             onBreakfast={onBreakfast}
             onDinner={onDinner}
             onOpenJar={() => setTab("jar")}
-            onOpenSettings={() => setOverlay("settings")}
-            onOpenChores={() => setOverlay("chores")}
+            onOpenSound={() => { setOverlay(null); setSoundPanel((v) => !v); }}
+            onOpenSettings={() => { setSoundPanel(false); setOverlay("settings"); }}
+            onOpenChores={() => { setSoundPanel(false); setOverlay("chores"); }}
+            onRemoveExtra={onRemoveExtra}
             onOpenIdentity={(id) => {
               if (id) {
                 setIdentity(id as IdentityId);
@@ -427,6 +432,7 @@ export default function App() {
               onClick={() => {
                 setOverlay(null);
                 setIdentity(null);
+                setSoundPanel(false);
                 setTab(t);
                       }}
               aria-current={active ? "page" : undefined}
@@ -454,6 +460,31 @@ export default function App() {
           );
         })}
       </nav>
+
+      {soundPanel ? (
+        <>
+          <div
+            onClick={() => setSoundPanel(false)}
+            style={{ position: "fixed", inset: 0, zIndex: 35, background: "transparent" }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: "calc(8px + env(safe-area-inset-top) + 52px)",
+              right: 16,
+              zIndex: 36,
+            }}
+          >
+            <SoundPanel
+              theme={theme}
+              store={store}
+              onToggleSounds={toggleSounds}
+              onToggleMusic={toggleMusic}
+              onClose={() => setSoundPanel(false)}
+            />
+          </div>
+        </>
+      ) : null}
 
       {sheet ? (
         <div id="freestyle-anchor">

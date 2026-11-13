@@ -53,7 +53,7 @@ export function SettingsPage({
   );
 }
 
-function Toggle({
+export function Toggle({
   theme,
   c,
   label,
@@ -125,5 +125,78 @@ function Toggle({
         />
       </span>
     </button>
+  );
+}
+
+export function SoundPanel({
+  theme,
+  store,
+  onToggleSounds,
+  onToggleMusic,
+  onClose,
+}: {
+  theme: GrokTheme;
+  store: Store;
+  onToggleSounds: () => void;
+  onToggleMusic: () => void;
+  onClose: () => void;
+}) {
+  const c = makeCraft(theme);
+  return (
+    <div
+      role="dialog"
+      aria-label="Sound and music"
+      style={{
+        width: 300,
+        maxWidth: "calc(100vw - 32px)",
+        background: c.card,
+        borderRadius: theme.radius.xl,
+        border: "1px solid " + c.hairline,
+        boxShadow: c.shadow,
+        padding: 8,
+        animation: "dcIn 180ms ease",
+        fontFamily: fontStack(theme),
+        color: theme.text.primary,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px 4px" }}>
+        <div style={{ ...theme.font.body1, fontWeight: theme.weight.semibold }}>Sound & music</div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          style={{
+            minHeight: 32,
+            padding: "4px 10px",
+            border: "none",
+            background: "transparent",
+            color: theme.text.secondary,
+            fontFamily: fontStack(theme),
+            ...theme.font.label,
+            fontWeight: theme.weight.semibold,
+            cursor: "pointer",
+          }}
+        >
+          Done
+        </button>
+      </div>
+      <Toggle
+        theme={theme}
+        c={c}
+        label="Sounds"
+        hint="Check-off, chain link, and the coin in the jar."
+        on={store.sounds}
+        onClick={onToggleSounds}
+      />
+      <div style={{ height: 1, background: c.hairline, margin: "0 12px" }} />
+      <Toggle
+        theme={theme}
+        c={c}
+        label="Quiet music"
+        hint="A soft background pad. Off until you turn it on."
+        on={store.music}
+        onClick={onToggleMusic}
+      />
+    </div>
   );
 }

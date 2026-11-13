@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { GrokTheme } from "../grok";
-import { BLOCKS, HABITS, WEEKLY, currentBlock, habitsIn, isAfter, type BlockId, type HabitDef } from "../habits";
+import { BLOCKS, WEEKLY, categoryOfOption, currentBlock, habitsIn, isAfter, tone, type BlockId, type HabitDef } from "../habits";
 import {
   blockFreestyle,
   chainStreak,
@@ -17,6 +17,7 @@ import {
   requiredComplete,
   todayKey,
   type DayState,
+  type FreestyleEntry,
   type Store,
 } from "../store";
 import { ChainLink, ChainPair, IconChevron, IconGear, IconList, IconSound, TreatJar } from "../icons";
@@ -33,10 +34,12 @@ export function Today({
   onBreakfast,
   onDinner,
   onOpenJar,
+  onOpenSound,
   onOpenSettings,
   onOpenChores,
   onOpenIdentity,
   onBackToday,
+  onRemoveExtra,
 }: {
   theme: GrokTheme;
   store: Store;
@@ -48,10 +51,12 @@ export function Today({
   onBreakfast: (v: "eggs" | "shake") => void;
   onDinner: (v: "cooked" | "out") => void;
   onOpenJar: () => void;
+  onOpenSound: () => void;
   onOpenSettings: () => void;
   onOpenChores: () => void;
   onOpenIdentity: (id?: string) => void;
   onBackToday: () => void;
+  onRemoveExtra: (id: string) => void;
 }) {
   const c = makeCraft(theme);
   const today = todayKey();
@@ -92,7 +97,7 @@ export function Today({
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flex: "0 0 auto" }}>
-          <IconBtn theme={theme} label={store.sounds ? "Sounds on" : "Sounds off"} onClick={onOpenSettings}>
+          <IconBtn theme={theme} label="Sound and music" onClick={onOpenSound} pressed={false}>
             <IconSound on={store.sounds} />
           </IconBtn>
           <IconBtn theme={theme} label="Chores" onClick={onOpenChores}>
@@ -244,6 +249,8 @@ export function Today({
             onOneMore={onOneMore}
             onBreakfast={onBreakfast}
             onDinner={onDinner}
+            onRemoveExtra={onRemoveExtra}
+            perExtra={store.jar.perExtra}
           />
         ))}
       </div>
@@ -304,6 +311,8 @@ function BlockCard({
   onOneMore,
   onBreakfast,
   onDinner,
+  onRemoveExtra,
+  perExtra,
 }: {
   theme: GrokTheme;
   c: Craft;
@@ -319,6 +328,8 @@ function BlockCard({
   onOneMore: (block: BlockId) => void;
   onBreakfast: (v: "eggs" | "shake") => void;
   onDinner: (v: "cooked" | "out") => void;
+  onRemoveExtra: (id: string) => void;
+  perExtra: number;
 }) {
   const def = BLOCKS.find((b) => b.id === block)!;
   const items = habitsIn(block);
@@ -459,6 +470,8 @@ function BlockCard({
               onOneMore={onOneMore}
               onBreakfast={onBreakfast}
               onDinner={onDinner}
+              onRemoveExtra={onRemoveExtra}
+              perExtra={perExtra}
             />
           ))}
         </div>
@@ -479,6 +492,8 @@ function HabitRow({
   onOneMore,
   onBreakfast,
   onDinner,
+  onRemoveExtra,
+  perExtra,
 }: {
   theme: GrokTheme;
   c: Craft;
@@ -491,11 +506,14 @@ function HabitRow({
   onOneMore: (block: BlockId) => void;
   onBreakfast: (v: "eggs" | "shake") => void;
   onDinner: (v: "cooked" | "out") => void;
+  onRemoveExtra: (id: string) => void;
+  perExtra: number;
 }) {
   const on = habitDone(day, habit.id);
   const isFs = habit.kind === "freestyle";
   const extras = isFs ? blockFreestyle(day, habit.block).filter((f) => f.extra) : [];
   const mains = isFs ? blockFreestyle(day, habit.block).filter((f) => !f.extra) : [];
+  const cat = tone(theme.kind, habit.category);
   const click = () => {
     if (isFs) {
       if (on) onToggle(habit.id);
@@ -525,8 +543,9 @@ function HabitRow({
     <div
       style={{
         borderRadius: theme.radius.lg,
-        background: on ? c.goldSoft : "transparent",
+        background: on ? cat.soft : "transparent",
         padding: "2px 0",
+        borderLeft: "3.5px solid " + cat.ink,
       }}
     >
       <button
@@ -558,11 +577,10 @@ function HabitRow({
               display: "block",
               ...theme.font.body1,
               lineHeight: "22px",
-              textDecoration: on ? "none" : "none",
-              fontWeight: on ? theme.weight.regular : theme.weight.medium,
+              fontWeight: theme.weight.regular,
             }}
           >
-            {habit.text}
+            <HabitLabel text={habit.text} action={habit.action} theme={theme} ink={cat.ink} />
           </span>
           {!on && habit.caption ? (
             <span style={{ display: "block", ...theme.font.caption, color: theme.text.tertiary, marginTop: 2 }}>{habit.caption}</span>
@@ -599,35 +617,60 @@ function HabitRow({
           {f.text}
         </div>
       ))}
-      {extras.map((f) => (
-        <div
-          key={f.id}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "4px 8px 8px 46px",
-            ...theme.font.caption,
-            color: c.goldDeep,
-            fontWeight: theme.weight.semibold,
-          }}
-        >
-          <span
+      {extras.map((f: FreestyleEntry) => {
+        const et = tone(theme.kind, categoryOfOption(f.optionId));
+        return (
+          <div
+            key={f.id}
             style={{
-              display: "inline-flex",
+              display: "flex",
               alignItems: "center",
-              padding: "1px 7px",
-              borderRadius: theme.radius.full,
-              background: c.goldSoft,
-              color: c.goldDeep,
+              gap: 8,
+              padding: "4px 8px 8px 46px",
+              ...theme.font.caption,
+              color: et.ink,
               fontWeight: theme.weight.semibold,
             }}
           >
-            +{Money(5).replace("$", "$")} extra
-          </span>
-          <span style={{ flex: "1 1 auto", minWidth: 0 }}>{f.text}</span>
-        </div>
-      ))}
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "1px 7px",
+                borderRadius: theme.radius.full,
+                background: et.soft,
+                color: et.ink,
+                fontWeight: theme.weight.semibold,
+                border: "1px solid " + et.ink,
+                flex: "0 0 auto",
+              }}
+            >
+              +{Money(perExtra)} extra
+            </span>
+            <span style={{ flex: "1 1 auto", minWidth: 0 }}>{f.text}</span>
+            <button
+              type="button"
+              onClick={() => onRemoveExtra(f.id)}
+              aria-label={"Undo extra: " + f.text}
+              style={{
+                minHeight: 32,
+                padding: "4px 10px",
+                borderRadius: theme.radius.full,
+                border: "1px solid " + c.gold,
+                background: "transparent",
+                color: c.goldDeep,
+                fontFamily: fontStack(theme),
+                ...theme.font.caption,
+                fontWeight: theme.weight.semibold,
+                cursor: "pointer",
+                flex: "0 0 auto",
+              }}
+            >
+              Undo
+            </button>
+          </div>
+        );
+      })}
       {isFs && on && isToday ? (
         <div style={{ padding: "0 8px 10px 46px" }}>
           <button
@@ -695,17 +738,20 @@ function IconBtn({
   onClick,
   theme,
   label,
+  pressed,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   theme: GrokTheme;
   label: string;
+  pressed?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={label}
+      aria-pressed={pressed}
       style={{
         width: 40,
         height: 40,
@@ -739,4 +785,33 @@ function quietBtn(theme: GrokTheme): React.CSSProperties {
     fontWeight: theme.weight.semibold,
     cursor: "pointer",
   };
+}
+
+function HabitLabel({
+  text,
+  action,
+  theme,
+  ink,
+}: {
+  text: string;
+  action: string | string[];
+  theme: GrokTheme;
+  ink: string;
+}) {
+  const parts = Array.isArray(action) ? action : [action];
+  const nodes: React.ReactNode[] = [];
+  let rest = text;
+  parts.forEach((phrase, i) => {
+    const idx = rest.indexOf(phrase);
+    if (idx < 0) return;
+    if (idx > 0) nodes.push(rest.slice(0, idx));
+    nodes.push(
+      <span key={i} style={{ fontWeight: theme.weight.semibold, color: ink }}>
+        {phrase}
+      </span>,
+    );
+    rest = rest.slice(idx + phrase.length);
+  });
+  if (rest) nodes.push(rest);
+  return nodes.length ? <>{nodes}</> : <>{text}</>;
 }

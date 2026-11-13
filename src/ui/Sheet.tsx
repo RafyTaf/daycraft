@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { GrokTheme } from "../grok";
-import { FREESTYLE, FREESTYLE_GROUPS, type BlockId, type FreestyleOption } from "../habits";
+import { FREESTYLE, FREESTYLE_GROUPS, categoryOfGroup, categoryOfOption, tone, type BlockId, type FreestyleOption } from "../habits";
 import { IconClose } from "../icons";
 import type { Chore } from "../store";
 import { Field, Pill, craft as makeCraft, fontStack } from "./chrome";
@@ -108,7 +108,7 @@ export function FreestyleSheet({
                 style={{
                   ...theme.font.caption,
                   fontWeight: theme.weight.semibold,
-                  color: theme.text.tertiary,
+                  color: tone(theme.kind, categoryOfGroup(g.id)).ink,
                   letterSpacing: "0.06em",
                   textTransform: "uppercase",
                   margin: "0 2px 6px",
@@ -126,6 +126,8 @@ export function FreestyleSheet({
                         title={o.text}
                         hint={choreOpen ? "Pick a chore, or log a quick tidy-up." : undefined}
                         onClick={() => setChoreOpen(!choreOpen)}
+                        ink={tone(theme.kind, categoryOfOption(o.id)).ink}
+                        soft={tone(theme.kind, categoryOfOption(o.id)).soft}
                       />
                       {choreOpen ? (
                         <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 0 4px 12px" }}>
@@ -137,7 +139,7 @@ export function FreestyleSheet({
                       ) : null}
                     </div>
                   ) : (
-                    <Choice key={o.id} theme={theme} c={c} title={o.text} onClick={() => onPick(o.id, o.text)} />
+                    <Choice key={o.id} theme={theme} c={c} title={o.text} onClick={() => onPick(o.id, o.text)} ink={tone(theme.kind, categoryOfOption(o.id)).ink} soft={tone(theme.kind, categoryOfOption(o.id)).soft} />
                   ),
                 )}
               </div>
@@ -184,6 +186,8 @@ function Choice({
   hint,
   onClick,
   accent,
+  ink,
+  soft,
 }: {
   theme: GrokTheme;
   c: ReturnType<typeof makeCraft>;
@@ -191,6 +195,8 @@ function Choice({
   hint?: string;
   onClick: () => void;
   accent?: boolean;
+  ink?: string;
+  soft?: string;
 }) {
   return (
     <button
@@ -204,6 +210,7 @@ function Choice({
         padding: "12px 14px",
         borderRadius: theme.radius.lg,
         border: "1px solid " + (accent ? c.gold : theme.border.default),
+        borderLeft: "3.5px solid " + (accent ? c.gold : ink || theme.border.default),
         background: accent ? c.goldSoft : theme.bg.base,
         color: theme.text.primary,
         fontFamily: fontStack(theme),
